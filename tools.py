@@ -69,8 +69,32 @@ def search_listings(
 
     Before writing code, fill in the Tool 1 section of planning.md.
     """
-    # Replace this with your implementation
-    return []
+    listings = load_listings()
+
+    if max_price is not None:
+        listings = [l for l in listings if l["price"] <= max_price]
+
+    if size is not None:
+        size_lower = size.lower()
+        listings = [l for l in listings if size_lower in l["size"].lower()]
+
+    keywords = description.lower().split()
+
+    def score(listing: dict) -> int:
+        text = " ".join([
+            listing["title"],
+            listing["description"],
+            listing["category"],
+            " ".join(listing.get("style_tags", [])),
+            " ".join(listing.get("colors", [])),
+            listing.get("brand") or "",
+        ]).lower()
+        return sum(1 for kw in keywords if kw in text)
+
+    scored = [(score(l), l) for l in listings]
+    scored = [(s, l) for s, l in scored if s > 0]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [l for _, l in scored]
 
 
 # ── Tool 2: suggest_outfit ────────────────────────────────────────────────────
@@ -100,8 +124,40 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
 
     Before writing code, fill in the Tool 2 section of planning.md.
     """
-    # Replace this with your implementation
-    return ""
+    client = _get_groq_client()
+    item_summary = (
+        f"Item: {new_item['title']}\n"
+        f"Category: {new_item['category']}\n"
+        f"Colors: {', '.join(new_item.get('colors', []))}\n"
+        f"Style tags: {', '.join(new_item.get('style_tags', []))}\n"
+        f"Condition: {new_item.get('condition', 'unknown')}"
+    )
+
+    if not wardrobe.get("items"):
+        prompt = (
+            f"A user is considering buying this thrifted item:\n{item_summary}\n\n"
+            "Their wardrobe is empty. Give them general styling advice: what kinds of "
+            "pieces pair well with this item, what vibe or aesthetic it suits, and one "
+            "or two example outfit ideas using common wardrobe staples."
+        )
+    else:
+        wardrobe_lines = "\n".join(
+            f"- {item['name']} ({', '.join(item.get('colors', []))})"
+            for item in wardrobe["items"]
+        )
+        prompt = (
+            f"A user is considering buying this thrifted item:\n{item_summary}\n\n"
+            f"Their current wardrobe contains:\n{wardrobe_lines}\n\n"
+            "Suggest 1–2 specific outfit combinations using the new item and named "
+            "pieces from their wardrobe. Be specific about which wardrobe pieces to pair."
+        )
+
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7,
+    )
+    return response.choices[0].message.content
 
 
 # ── Tool 3: create_fit_card ───────────────────────────────────────────────────
@@ -133,5 +189,26 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
 
     Before writing code, fill in the Tool 3 section of planning.md.
     """
-    # Replace this with your implementation
-    return ""
+    if not outfit or not outfit.strip():
+        return "Error: outfit description is missing — cannot generate a fit card."
+
+    client = _get_groq_client()
+    prompt = (
+        f"Write a 2–4 sentence Instagram/TikTok caption for this thrifted outfit.\n\n"
+        f"Thrifted item: {new_item['title']}\n"
+        f"Price: ${new_item['price']}\n"
+        f"Platform: {new_item['platform']}\n"
+        f"Outfit: {outfit}\n\n"
+        "Rules:\n"
+        "- Sound casual and authentic, like a real OOTD post — not a product description\n"
+        "- Mention the item name, price, and platform naturally, each exactly once\n"
+        "- Capture the specific vibe of the outfit\n"
+        "- Do not use hashtags"
+    )
+
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=1.0,
+    )
+    return response.choices[0].message.content
